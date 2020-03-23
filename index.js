@@ -403,9 +403,27 @@ async function renderPrediction() {
   const faceBoxSeq = faceBoxPoints.length > 0 ? boxKeys.map(b => ({ indices: BOX_SEQ[b].map(s => s + faceBoxSeqOffset) })) : [];
   scatterGL.setSequences(fingerSeq.concat(handBoxSeq).concat(faceBoxSeq));
 
+  const f = (d) => { // Format to number to have consistent length
+    const options = { minimumIntegerDigits: 3, minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false };
+    let str = d.toLocaleString('en', options);
+    if (d >= 0) {
+      str = ` ${str}`;
+    }
+    return str;
+  };
+
+  // console.log(facePoints);
+  const deltaVolume = getIntersectionVolume(handBox, faceBox);
+  const min_hand_face_distance = comparePoints(handPoints, facePoints);
+  
   scatterGL.setPointColorer((i, selectedIndices, hoverIndex) => {
+    if (min_hand_face_distance && 
+        (i == min_hand_face_distance.face_point_idx || i == min_hand_face_distance.hand_point_idx)) {
+      return 'red';
+    }
+
     let length = handPoints.length;
-    if (i < length) return 'red';
+    if (i < length) return 'yellow';
 
     length = length + facePoints.length;
     if (i < length) return 'green';
@@ -416,37 +434,25 @@ async function renderPrediction() {
     return 'blue';
   });
 
-  const f = (d) => { // Format to number to have consistent length
-    const options = { minimumIntegerDigits: 3, minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false };
-    let str = d.toLocaleString('en', options);
-    if (d >= 0) {
-      str = ` ${str}`;
-    }
-    return str;
-  };
-  console.log(facePoints);
-  const deltaVolume = getIntersectionVolume(handBox, faceBox);
-  const d = comparePoints(handPoints, facePoints);
-  // await sleep(10000000);
-  document.querySelector('#distance').innerText = d
-    ? `Closest ||p||: ${f(d.distance)}, Δx: ${f(d.diff_x)}, Δy: ${f(d.diff_y)}, Δz: ${f(d.diff_z)}`
+  document.querySelector('#distance').innerText = min_hand_face_distance
+    ? `Closest ||p||: ${f(min_hand_face_distance.distance)}, Δx: ${f(min_hand_face_distance.diff_x)}, Δy: ${f(min_hand_face_distance.diff_y)}, Δz: ${f(min_hand_face_distance.diff_z)}`
     : `Closest ||p||: Undefined`;
 
   document.querySelector('#intersection').innerText = `Volume intersected: ${deltaVolume}`;
-  document.querySelector('#deltaCenter').innerText = d
+  document.querySelector('#deltaCenter').innerText = min_hand_face_distance
     ? `Center bounding box ||p||: ${f(Math.sqrt(Math.pow(handBox.xCenter - faceBox.xCenter, 2) + Math.pow(handBox.yCenter - faceBox.yCenter, 2) + Math.pow(handBox.zCenter - faceBox.zCenter, 2)))} Δx:${f(handBox.xCenter - faceBox.xCenter)} Δy:${f(handBox.yCenter - faceBox.yCenter)} Δz:${f(handBox.zCenter - faceBox.zCenter)}`
     : `Center bounding box: Undefined`;
 
   let detected = false;
-  if (handBox && faceBox && deltaVolume > 0 && !!d) {
+  if (handBox && faceBox && deltaVolume > 0 && !!min_hand_face_distance) {
     // Only if the two bounding boxes intersect
     if (faceBox.xMin < handBox.xMin && handBox.xMax < faceBox.xMax) {
       // The hand bounding box is with in the face box,
       // which means the hand is in front of the face
-      detected = d.d < 10;
+      detected = min_hand_face_distance.distance < 10;
     } else {
       // The hand is on the side
-      detected = d.d < 30;
+      detected = min_hand_face_distance.distance < 30;
     }
   }
   document.querySelector('#detection').innerText = `Detection: ${detected ? 'Yes' : 'No'}`;
