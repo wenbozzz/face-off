@@ -23,6 +23,7 @@ import * as tf from '@tensorflow/tfjs-core';
 import * as tfjsWasm from '@tensorflow/tfjs-backend-wasm';
 
 import { TRIANGULATION } from './triangulation';
+var createTree = require('yaot'); // from https://github.com/anvaka/yaot
 
 tfjsWasm.setWasmPath(
   `https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${
@@ -298,23 +299,63 @@ function boxToPoints(box) {
   return [];
 }
 
-function comparePoints(points1, points2) {
-  // TODO better algorithm
-  let shortestDistance = undefined;
-  for (let i = 0; i < points1.length; i++) {
-    for (let j = 0; j < points2.length; j++) {
-      const p1 = points1[i];
-      const p2 = points2[j];
-      const x = p1[0] - p2[0];
-      const y = p1[1] - p2[1];
-      const z = p1[2] - p2[2];
-      const d = Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2) + Math.pow(z, 2));
-      if (shortestDistance === undefined || d < shortestDistance.d) {
-        shortestDistance = { x, y, z, d };
+
+const sleep = (milliseconds) => {
+  return new Promise(resoylve => setTimeout(resolve, milliseconds))
+}
+
+
+function sort_point_by_x(a, b) {
+  if (a[0] > b[0]) return 1;
+  if (b[0] > a[0]) return -1;
+  return 0;
+}
+
+function sort_point_by_y(a, b) {
+  if (a[1] > b[1]) return 1;
+  if (b[1] > a[1]) return -1;
+  return 0;
+}
+
+function sort_point_by_z(a, b) {
+  if (a[2] > b[2]) return 1;
+  if (b[2] > a[2]) return -1;
+  return 0;
+}
+
+const distance_threshold = 35;
+function comparePoints(handPoints, facePoints) {
+  const tree = createTree();
+  let octree_points = [];
+
+  for (let i = 0; i < facePoints.length; i++) {
+    octree_points.push(facePoints[i][0], facePoints[i][1], facePoints[i][2]);
+  }
+  tree.init(octree_points);
+  console.log("octree built!");
+
+  let min_distance = undefined;
+  for (let hand_point_idx = 0; hand_point_idx < handPoints.length; hand_point_idx++) {
+    const hand_point = handPoints[hand_point_idx];
+    const matches = tree.intersectSphere(hand_point[0], hand_point[1], hand_point[2], distance_threshold);
+    console.log("matches:", matches);
+    if (matches.length != 0) {
+      console.log("found face points in range for hand point:", hand_point[0], hand_point[1], hand_point[2]);
+      for (let j = 0; j < matches.length; j++) {
+        const face_point_idx = matches[j] / 3; // tree.intersectSphere returns indexes at octree_points
+        const face_point = facePoints[face_point_idx];
+        console.log("face point:", face_point);
+        const diff_x = hand_point[0] - face_point[0];
+        const diff_y = hand_point[1] - face_point[1];
+        const diff_z = hand_point[2] - face_point[2];
+        const distance = Math.sqrt(Math.pow(diff_x, 2) + Math.pow(diff_y, 2) + Math.pow(diff_z, 2));
+        if (min_distance === undefined || distance < min_distance.distance) {
+          min_distance = { diff_x, diff_y, diff_z, distance, hand_point_idx, face_point_idx};
+        }
       }
     }
   }
-  return shortestDistance;
+  return min_distance;
 }
 
 // These anchor points allow the hand pointcloud to resize according to its
@@ -383,11 +424,12 @@ async function renderPrediction() {
     }
     return str;
   };
+  console.log(facePoints);
   const deltaVolume = getIntersectionVolume(handBox, faceBox);
   const d = comparePoints(handPoints, facePoints);
-
+  // await sleep(10000000);
   document.querySelector('#distance').innerText = d
-    ? `Closest ||p||: ${f(d.d)}, Δx: ${f(d.x)}, Δy: ${f(d.y)}, Δz: ${f(d.z)}`
+    ? `Closest ||p||: ${f(d.distance)}, Δx: ${f(d.diff_x)}, Δy: ${f(d.diff_y)}, Δz: ${f(d.diff_z)}`
     : `Closest ||p||: Undefined`;
 
   document.querySelector('#intersection').innerText = `Volume intersected: ${deltaVolume}`;
